@@ -6,6 +6,7 @@
 #define SSD_BASED_PLAN_INDEX_H
 #include <atomic>
 #include <cstddef>
+#include <numeric>
 #include <ostream>
 #define INF 0xffffffff
 #include <shared_mutex>
@@ -31,7 +32,7 @@
 #define READ_U64(stream, val) stream.read((char *)&val, sizeof(_u64))
 #define ROUND_UP(X, Y) \
     (((uint64_t)(X) / (Y)) + ((uint64_t)(X) % (Y) != 0)) * (Y)
-#define SECTOR_LEN 4096
+#define SECTOR_LEN (_u64) 4096
 #define DEBUG true
 
 typedef unsigned long int _u64;
@@ -107,7 +108,7 @@ public:
     Index(const size_t dimension, const size_t n) : _dim(dimension), nd(n)
     {
     }
-    Index(const size_t dimension, const size_t n, const char *indexName, const char *data_type = "uint8", bool load_disk = false, bool debug = false, bool sample = false)
+    Index(const size_t dimension, const size_t n, const char *indexName, const char *data_type = "uint8", bool load_disk = false, bool debug = false, bool sample = false, int BS=1)
     {
 
         this->debug = debug;
@@ -132,11 +133,11 @@ public:
         {
             if (std::string(data_type) == std::string("uint8"))
             {
-                load_disk_index<uint8_t>(indexName);
+                load_disk_index<uint8_t>(indexName, BS);
             }
             else if (std::string(data_type) == std::string("float"))
             {
-                load_disk_index<float>(indexName);
+                load_disk_index<float>(indexName, BS);
             }
             else
             {
@@ -146,7 +147,7 @@ public:
         }
         else
         {
-            load_vamana(indexName);
+            load_vamana(indexName,sample);
         }
         cursize = nd / 1000;
         for(unsigned i =0; i<nd; i++){
@@ -206,7 +207,6 @@ public:
                 ++nodes;
                 std::vector<unsigned> tmp(k);
                 in.read((char *)tmp.data(), k * sizeof(unsigned));
-
                 direct_graph.emplace_back(tmp);
                 if (nodes % 10000000 == 0)
                     std::cout << "." << std::flush;
@@ -218,22 +218,19 @@ public:
             }
             if (sample)
             {
-
-                std::random_device rd;
-                std::mt19937 gen(rd());
-                std::uniform_real_distribution<> dis(0, 1);
-#pragma omp parallel for
-                for (int i = 0; i < nd; i++)
-                {
-                    std::set<unsigned> s;
-                    while (s.size() < 40 && s.size() < direct_graph[i].size())
-                    {
-                        unsigned t = direct_graph[i].size() * dis(gen);
-                        s.insert(direct_graph[i][t]);
+                std::cout << "cut adj" << std::endl;
+                for(unsigned i=0; i< nd; i++){
+                    std::vector<unsigned> tmp;
+                    tmp.reserve(10);
+                    for(unsigned j=0; j<20 && j<direct_graph[i].size(); j++){
+                        tmp.push_back(direct_graph[i][j]);
                     }
-                    direct_graph[i] = std::vector<unsigned>(s.begin(), s.end());
+                    direct_graph[i].clear();
+                    direct_graph[i].assign(tmp.begin(), tmp.end());
                 }
             }
+            C = 12;
+            _partition_number = ROUND_UP(nd, C) / C;
             reverse_graph.resize(nd);
             std::vector<std::mutex> ms(nd);
 #pragma omp parallel for shared(reverse_graph, direct_graph)
@@ -243,11 +240,16 @@ public:
                 {
                     std::lock_guard<std::mutex> lock(ms[direct_graph[i][j]]);
                     reverse_graph[direct_graph[i][j]].emplace_back(i);
+                    
                 }
             }
             std::cout << "done. Index has " << nodes << " nodes and " << cc
                       << " out-edges" << std::endl;
             en = cc;
+            for (int i = 0; i < _partition_number; i++)
+            {
+                pmutex.push_back(new std::mutex);
+            }
         }
         catch (std::system_error &e)
         {
@@ -255,7 +257,7 @@ public:
         }
     }
     template <typename T>
-    void load_disk_index(const char *index_name)
+    void load_disk_index(const char *index_name, int BS=1)
     {
         std::cout << "loading disk index file: " << index_name << "... " << std::flush;
         std::ifstream in;
@@ -277,13 +279,12 @@ public:
             }
             if (nd != meta_data[1])
             {
-                std::cout << "npts mismatch" << std::endl;
+                std::cout <<"nd: "<<nd<<"meta_data: "<<meta_data[1]<< " npts mismatch" << std::endl;
                 exit(-1);
             }
             max_node_len = meta_data[3];
             C = meta_data[4];
             _partition_number = ROUND_UP(nd, C) / C;
-            std::cout << "nd: " << nd << " _dim:" << _dim << " C:" << C << " pn:" << _partition_number << std::endl;
 
             std::unique_ptr<char[]> mem_index = std::make_unique<char[]>(_partition_number * SECTOR_LEN);
             in.read(mem_index.get(), _partition_number * SECTOR_LEN);
@@ -339,6 +340,9 @@ public:
             for(unsigned i=0; i< nd; i++){
                 
             }
+            C = (SECTOR_LEN*BS) / max_node_len;
+            _partition_number = ROUND_UP(nd, C) / C;
+            std::cout << "nd: " << nd << " _dim:" << _dim << " C:" << C << " pn:" << _partition_number << std::endl;
             for (int i = 0; i < _partition_number; i++)
             {
                 pmutex.push_back(new std::mutex);
@@ -547,9 +551,10 @@ public:
     void load_partition(const char *filename)
     {
         std::ifstream reader(filename, std::ios::binary);
-        reader.read((char *)&_partition_number, sizeof(unsigned));
-        reader.read((char *)&C, sizeof(unsigned));
-        std::cout << "_partition_num: " << _partition_number << ", C: " << C << std::endl;
+        reader.read((char *)&C, sizeof(_u64));
+        reader.read((char *)&_partition_number, sizeof(_u64));
+        reader.read((char*)&nd, sizeof(_u64));
+        std::cout << "load partition _partition_num: " << _partition_number << ", C: " << C << std::endl;
         _partition.clear();
         auto tmp = new unsigned[C];
         for (unsigned i = 0; i < _partition_number; i++)
@@ -566,6 +571,7 @@ public:
             _partition.push_back(tt);
         }
         delete []tmp;
+        re_id2pid();
     }
     void re_id2pid()
     {
@@ -984,39 +990,39 @@ public:
         //     res = p.top().id;
         // }
         pcount.clear();
-        if( res == INF -1){
-            for(auto &n :direct_graph[i]){
-                for(auto &s :direct_graph[n]){
-                    unsigned pid = id2pid[s];
-                    if(pid == INF){
-                        continue;
-                    }
-                    pcount[pid] = pcount[pid] + 1;
-                }
-            }
-            for(auto &n :reverse_graph[i]){
-                for(auto &s :reverse_graph[n]){
-                    unsigned pid = id2pid[s];
-                    if(pid == INF){
-                        continue;
-                    }
-                    pcount[pid] = pcount[pid] + 1;
-                }
-            }
-            for (auto& c : pcount)
-            {
-                unsigned pid = c.first;
-                float cnt = c.second;
-                std::lock_guard<std::mutex> lock(*pmutex[pid]);
-                double s = _partition[pid].size();
-                cnt *= (1 - s / C);
-                if (cnt > maxn && _partition[pid].size() < C)
-                {
-                    res = pid;
-                    maxn = cnt;
-                }
-            }
-        }
+        // if( res == INF-1){
+        //     for(auto &n :direct_graph[i]){
+        //         for(auto &s :direct_graph[n]){
+        //             unsigned pid = id2pid[s];
+        //             if(pid == INF){
+        //                 continue;
+        //             }
+        //             pcount[pid] = pcount[pid] + 1;
+        //         }
+        //     }
+        //     for(auto &n :reverse_graph[i]){
+        //         for(auto &s :reverse_graph[n]){
+        //             unsigned pid = id2pid[s];
+        //             if(pid == INF){
+        //                 continue;
+        //             }
+        //             pcount[pid] = pcount[pid] + 1;
+        //         }
+        //     }
+        //     for (auto& c : pcount)
+        //     {
+        //         unsigned pid = c.first;
+        //         float cnt = c.second;
+        //         std::lock_guard<std::mutex> lock(*pmutex[pid]);
+        //         double s = _partition[pid].size();
+        //         cnt *= (1 - s / C);
+        //         if (cnt > maxn && _partition[pid].size() < C)
+        //         {
+        //             res = pid;
+        //             maxn = cnt;
+        //         }
+        //     }
+        // }
         
         if (res == INF)
         {
@@ -1053,6 +1059,9 @@ public:
 
         std::shared_lock<std::shared_mutex> lock(smutex);
         unsigned tmp = (*_dis)(*_gen) * unfilled_partition.size();
+        if(tmp > unfilled_partition.size()){
+            std::cout << "error tmp: "<< tmp << std::endl;
+        }
         auto r = unfilled_partition.begin();
         std::advance(r, tmp);
         res = r->first;
@@ -1159,17 +1168,19 @@ public:
         _partition.resize(_partition_number);
         if (true)
         {
+            std::unordered_set<unsigned> vis;
             for (unsigned i = 0; i < _partition_number; i++)
             {
-                std::vector<unsigned> tmp(C);
-                for (unsigned j = 0; j < C; j++)
+                for (unsigned j = 0; j < C && i*C +j < nd; j++)
                 {
                     id2pid[i * C + j] = i;
+                    _partition[i].push_back(i*C+j);
                 }
             }
             // auto ivf_file_name = std::string(filename) + std::string(".ivf0");
             // save_partition(ivf_file_name.c_str());
         }
+        // load_partition("../bigann/DEEP_10M_R48_L128_B0.225_greed");
         for (int i = 0; i < k; i++)
         {
             select_free=0;
@@ -1219,6 +1230,10 @@ public:
         cur = 0;
         visited.clear();
         std::cout << "start" << std::endl;
+        std::vector<unsigned> stream(nd);
+        std::iota(stream.begin(), stream.end(), 0);
+        auto rng = std::default_random_engine {};
+        std::shuffle(std::begin(stream), std::end(stream), rng);
         for (int i = 0; i < _partition_number; i++)
         {
             unfilled_partition[i] = true;
@@ -1227,11 +1242,13 @@ public:
         //     id2pid[i] = INF;
         // }
         auto start = omp_get_wtime();
+        size_t offset = (*_dis)(*_gen) * nd;
 #pragma omp parallel for schedule(dynamic)
-        for (int i = 0; i < nd; i++)
+        for (unsigned i = 0; i < nd; i++)
         {
             // debug();
-            sync(i);
+            size_t n = stream[i];
+            sync(n);
             // unsigned pid = select_partition(i);
             // pmutex[pid]->lock();
             // while (_partition[pid].size() == C)
