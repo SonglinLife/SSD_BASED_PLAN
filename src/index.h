@@ -30,7 +30,7 @@
 #include <queue>
 #include <random>
 #include <oneapi/tbb/concurrent_queue.h>
-using concurrent_queue= oneapi::tbb::concurrent_queue<unsigned>;
+using concurrent_queue= oneapi::tbb::concurrent_bounded_queue<unsigned>;
 #define READ_U64(stream, val) stream.read((char *)&val, sizeof(_u64))
 #define ROUND_UP(X, Y) \
     (((uint64_t)(X) / (Y)) + ((uint64_t)(X) % (Y) != 0)) * (Y)
@@ -1059,14 +1059,14 @@ public:
 
         unsigned res;
 
-        std::shared_lock<std::shared_mutex> lock(smutex);
-        unsigned tmp = (*_dis)(*_gen) * unfilled_partition.size();
-        if(tmp > unfilled_partition.size()){
-            std::cout << "error tmp: "<< tmp << std::endl;
-        }
-        auto r = unfilled_partition.begin();
-        std::advance(r, tmp);
-        res = r->first;
+        // std::shared_lock<std::shared_mutex> lock(smutex);
+        // unsigned tmp = (*_dis)(*_gen) * unfilled_partition.size();
+        // if(tmp > unfilled_partition.size()){
+        //     std::cout << "error tmp: "<< tmp << std::endl;
+        // }
+        // auto r = unfilled_partition.begin();
+        // std::advance(r, tmp);
+        // res = r->first;
         // for (int i = 0; i < _partition_number; i++)
         // {
         //     int pid = (tmp + i) % _partition_number;
@@ -1077,6 +1077,10 @@ public:
         //         break;
         //     }
         // }
+        do
+        {
+           free_q.pop(res); 
+        } while(_partition[res].size() == C);
         return res;
     }
     void bfs(unsigned start)
@@ -1238,7 +1242,7 @@ public:
         std::shuffle(std::begin(stream), std::end(stream), rng);
         for (int i = 0; i < _partition_number; i++)
         {
-            unfilled_partition[i] = true;
+            // unfilled_partition[i] = true;
             free_q.push(i);
         }
         // for(int i=0; i<nd; i++){
@@ -1294,11 +1298,12 @@ public:
         unsigned s = _partition[pid].size();
         pmutex[pid]->unlock();
 
-        if (s == C)
+        if (s != C)
         {
             // std::lock_guard<std::mutex> lock(flock);
-            std::unique_lock<std::shared_mutex>lock(smutex);
-            unfilled_partition.erase(pid);
+            // std::unique_lock<std::shared_mutex>lock(smutex);
+            // unfilled_partition.erase(pid);
+            free_q.push(pid);    
         }
 
         return pid;

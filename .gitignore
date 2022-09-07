@@ -7,4 +7,6 @@ bigann
 GKlib
 KaHIP
 METIS
+.cache
+.vscode
 openmpi
