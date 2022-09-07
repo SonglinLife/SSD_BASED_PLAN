@@ -29,6 +29,8 @@
 #include <mutex>
 #include <queue>
 #include <random>
+#include <oneapi/tbb/concurrent_queue.h>
+using concurrent_queue= oneapi::tbb::concurrent_queue<unsigned>;
 #define READ_U64(stream, val) stream.read((char *)&val, sizeof(_u64))
 #define ROUND_UP(X, Y) \
     (((uint64_t)(X) / (Y)) + ((uint64_t)(X) % (Y) != 0)) * (Y)
@@ -1237,6 +1239,7 @@ public:
         for (int i = 0; i < _partition_number; i++)
         {
             unfilled_partition[i] = true;
+            free_q.push(i);
         }
         // for(int i=0; i<nd; i++){
         //     id2pid[i] = INF;
@@ -1816,6 +1819,7 @@ public:
    std::shared_mutex smutex;
    std::vector<ListNode*> priority_list;
    std::unordered_set<unsigned> free_node;
+   concurrent_queue free_q;
    std::unordered_set<unsigned> fix_node;
    std::unordered_map<unsigned, ListNode*> id2ptr;
 };
