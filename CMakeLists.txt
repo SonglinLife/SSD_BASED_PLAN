@@ -12,14 +12,9 @@ else()
     message(FATAL_ERROR "no OpenMP supprot")
 endif()
 
-add_compile_options(-rdynamic)
 add_executable(SSD_Based_Plan main.cpp)
 
-target_include_directories(SSD_Based_Plan PUBLIC /data/wsl/SSD_Based_Plan/KaHIP/deploy)
-target_link_directories(SSD_Based_Plan PUBLIC /data/wsl/SSD_Based_Plan/KaHIP/deploy)
-target_link_directories(SSD_Based_Plan PUBLIC /usr/local/lib)
 find_package(TBB)
-target_link_libraries(SSD_Based_Plan PUBLIC libkahip.a libmetis.so libGKlib.a TBB::tbb)
-target_compile_options(SSD_Based_Plan PUBLIC -fopenmp)
-
+target_link_libraries(SSD_Based_Plan PUBLIC TBB::tbb)
+target_compile_options(SSD_Based_Plan PRIVATE ${TBB_CXX_STD_FLAG})
 # add_compile_options(-fno-inline-small-functions)

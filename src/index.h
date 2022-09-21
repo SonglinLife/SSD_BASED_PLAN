@@ -5,6 +5,8 @@
 #ifndef SSD_BASED_PLAN_INDEX_H
 #define SSD_BASED_PLAN_INDEX_H
 #include <atomic>
+#include <bitset>
+#include <cassert>
 #include <cstddef>
 #include <numeric>
 #include <ostream>
@@ -1200,6 +1202,14 @@ public:
         }
         std::cout << "select pid nums" << select_nums << " get unfilled partition nums: " << getUnfilled_nums << std::endl;
         std::cout << "total ivf time: " << ivf_time << std::endl;
+        std::bitset<10000000>bs;
+#pragma omp parallel for
+        for(auto p:_partition){
+            for(auto n: p){
+                assert(!bs.test(n));
+                bs.set(n);
+            }
+        }
         if(dn==0)return;
         // save_partition(filename);
         // load_partition(filename);
