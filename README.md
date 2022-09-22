@@ -1,5 +1,11 @@
 # SSD_Based_Plan
 
+# clone
+
+```
+git clone --recursive git@github.com:SonglinLife/SSD_BASED_PLAN.git 
+```
+
 ## compile
 
 ``` sh
