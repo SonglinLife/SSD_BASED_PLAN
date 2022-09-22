@@ -1204,8 +1204,8 @@ public:
         std::cout << "total ivf time: " << ivf_time << std::endl;
         std::bitset<10000000>bs;
 #pragma omp parallel for
-        for(auto p:_partition){
-            for(auto n: p){
+        for (size_t i = 0; i < _partition.size(); ++i) {
+            for (auto n : _partition[i]) {
                 assert(!bs.test(n));
                 bs.set(n);
             }
