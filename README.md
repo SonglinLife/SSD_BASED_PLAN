@@ -10,7 +10,7 @@ git clone --recursive git@github.com:SonglinLife/SSD_BASED_PLAN.git
 
 ``` sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake --build build --target SSD_Based_Plan -j8
 ```
 
 ## use
