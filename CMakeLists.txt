@@ -14,11 +14,6 @@ endif()
 
 add_executable(SSD_Based_Plan main.cpp)
 
-# find_package(TBB)
+set(TBB_TEST OFF CACHE BOOL "TBB Test" FORCE)
 add_subdirectory(oneTBB)
-target_include_directories(SSD_Based_Plan PUBLIC oneTBB/src/tbb)
-target_link_directories(SSD_Based_Plan PUBLIC oneTBB/src/tbb)
 target_link_libraries(SSD_Based_Plan PUBLIC tbb)
-# target_link_libraries(SSD_Based_Plan PUBLIC TBB::tbb)
-# target_compile_options(SSD_Based_Plan PRIVATE ${TBB_CXX_STD_FLAG})
-# add_compile_options(-fno-inline-small-functions)
