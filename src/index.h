@@ -98,6 +98,36 @@ inline size_t get_file_size(const std::string &fname)
     }
 }
 
+// DiskANN changes how the meta is stored in the first sector of
+// the _disk.index file after commit id 8bb74ff637cb2a77c99b71368ade68c62b7ca8e0 (exclusive)
+// It returns <is_new_version, vector of metas uint64_ts>
+std::pair<bool, std::vector<_u64>> get_disk_index_meta(const std::string& path) {
+    std::ifstream fin(path, std::ios::binary);
+
+    int meta_n, meta_dim;
+    const int expected_new_meta_n = 9;
+    const int expected_new_meta_n_with_reorder_data = 12;
+    const int old_meta_n = 11;
+    bool is_new_version = true;
+    std::vector<_u64> metas;
+
+    fin.read((char*)(&meta_n), sizeof(int));
+    fin.read((char*)(&meta_dim), sizeof(int));
+
+    if (meta_n == expected_new_meta_n ||
+            meta_n == expected_new_meta_n_with_reorder_data) {
+        metas.resize(meta_n);
+        fin.read((char *)(metas.data()), sizeof(_u64) * meta_n);
+    } else {
+        is_new_version = false;
+        metas.resize(old_meta_n);
+        fin.seekg(0, std::ios::beg);
+        fin.read((char *)(metas.data()), sizeof(_u64) * old_meta_n);
+    }
+    fin.close();
+    return {is_new_version, metas};
+}
+
 typedef std::priority_queue<pnode, std::vector<pnode>> ppq;
 class Index
 {
@@ -117,16 +147,20 @@ public:
 
         this->debug = debug;
         std::srand(static_cast<unsigned int>(std::time(nullptr)));
-        std::ifstream index_meta(indexName, std::ios::binary);
         size_t actual_size = get_file_size(indexName);
         size_t expected_size;
-        index_meta.read((char *)&expected_size, sizeof(size_t));
+        auto meta_pair = get_disk_index_meta(indexName);
+        if (meta_pair.first) {
+            expected_size = meta_pair.second.back();
+        } else {
+            expected_size = meta_pair.second.front();
+        }
+
         if (actual_size != expected_size)
         {
             std::cout << "index file not match!" << std::endl;
             exit(-1);
         }
-        index_meta.close();
         _dim = dimension;
         nd = n;
         // load_vamana(indexName, sample);
@@ -269,29 +303,38 @@ public:
 
         try
         {
-            // get metadata
-            in.open(index_name, std::ios::binary);
-            std::unique_ptr<_u64[]> meta_data = std::make_unique<_u64[]>(12);
-            memset(meta_data.get(), 0, 12 * sizeof(_u64));
-            in.read((char *)meta_data.get(), 10 * sizeof(_u64));
-            in.seekg(SECTOR_LEN, std::ios::beg);
+            _u64 expected_file_size, expected_npts;
             _u64 actual_file_size = get_file_size(index_name);
-            if (actual_file_size != meta_data[0])
+            auto meta_pair = get_disk_index_meta(index_name);
+
+            if (meta_pair.first) {
+                // new version
+                expected_file_size = meta_pair.second.back();
+                expected_npts = meta_pair.second.front();
+            } else {
+                expected_file_size = meta_pair.second.front();
+                expected_npts = meta_pair.second[1];
+            }
+
+            if (actual_file_size != expected_file_size)
             {
                 std::cout << "file size mismatch!" << std::endl;
                 exit(-1);
             }
-            if (nd != meta_data[1])
+            if (nd != expected_npts)
             {
-                std::cout <<"nd: "<<nd<<"meta_data: "<<meta_data[1]<< " npts mismatch" << std::endl;
+                std::cout <<"nd: "<<nd<<"meta_data: "<< expected_npts << " npts mismatch" << std::endl;
                 exit(-1);
             }
-            max_node_len = meta_data[3];
-            C = meta_data[4];
+            max_node_len = meta_pair.second[3];
+            C = meta_pair.second[4];
             _partition_number = ROUND_UP(nd, C) / C;
 
             std::unique_ptr<char[]> mem_index = std::make_unique<char[]>(_partition_number * SECTOR_LEN);
+            in.open(index_name, std::ios::binary);
+            in.seekg(SECTOR_LEN, std::ios::beg);
             in.read(mem_index.get(), _partition_number * SECTOR_LEN);
+            in.close();
             direct_graph.resize(nd);
             _u64 des = 0;
 #pragma omp parallel for schedule(dynamic, 1) reduction(+: des)
