@@ -12,6 +12,6 @@ dim=96
 data_type=float
 nd=10000000
 gp_file=./gpfile/deep_10m_r48_rb1
-./SSD_Based_Plan $dim $nd $index $data_type $gp_file 64 16 0 1 1 
-#>> ${gp_file}.log
+./SSD_Based_Plan $dim $nd $index $data_type $gp_file 64 16 0 1 1 #>> ${gp_file}.log
+
 
