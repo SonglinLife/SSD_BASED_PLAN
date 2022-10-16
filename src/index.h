@@ -220,7 +220,7 @@ public:
      * load vamana graph index from disk
      * @param filename
      */
-    void load_vamana(const char *filename, bool sample = false)
+    void load_vamana(const char *filename, bool sample = false, const unsigned sample_num = 0)
     {
         std::cout << "Reading index file: " << filename << "... " << std::flush;
         std::ifstream in;
@@ -260,7 +260,7 @@ public:
                 for(unsigned i=0; i< nd; i++){
                     std::vector<unsigned> tmp;
                     tmp.reserve(10);
-                    for(unsigned j=0; j<20 && j<direct_graph[i].size(); j++){
+                    for(unsigned j=0; j<sample_num && j<direct_graph[i].size(); j++){
                         tmp.push_back(direct_graph[i][j]);
                     }
                     direct_graph[i].clear();
@@ -1210,7 +1210,58 @@ public:
         auto end = omp_get_wtime();
         std::cout << "Round " << round << "bfs time: " << end - start << " finished." << std::endl;
     }
-    void graph_partition(const char *filename, int k, int dn = 0)
+    void re_partition() {
+        _partition.clear();
+        _partition.resize(_partition_number);
+        for (unsigned i = 0; i < nd; i++) {
+            _partition[id2pid[i]].emplace_back(i);
+        }
+    }
+    void init2_id2pid(int strategy_num) { //
+        std::priority_queue<std::pair<unsigned, unsigned>, std::vector<std::pair<unsigned, unsigned>>,
+                CompareByFirst> visited_freq_tmp(visited_freq);
+        std::vector<unsigned> vis(nd);
+        unsigned pi = 0;
+        int visit_feq_num = 0;
+        lock_id.resize(nd);
+        while (!visited_freq_tmp.empty()) {
+            visit_feq_num++;
+            unsigned cur_id = visited_freq_tmp.top().first;
+            unsigned cur_id_freq = visited_freq_tmp.top().second;
+            visited_freq_tmp.pop();
+            if (vis[cur_id]) continue;
+            if (_partition[pi].size() == C) {
+                pi++;
+            }
+            _partition[pi].push_back(cur_id);
+            id2pid[cur_id] = pi;
+            if (strategy_num == 1){
+                if (true) lock_id[cur_id] = 1; 
+                vis[cur_id]  = 1;
+                for (auto n : direct_graph[cur_id]) {
+                    if (vis[n]) continue;
+                    if (_partition[pi].size() == C) continue;
+                    _partition[pi].push_back(n);
+                    id2pid[n] = pi;
+                    if (true) lock_id[cur_id] = 1; 
+                    vis[n] = 1;
+            }
+            }
+            else if (strategy_num == 3){
+                if (visit_feq_num < 1000) lock_id[cur_id] = 1; 
+                vis[cur_id]  = 1;
+                for (auto n : direct_graph[cur_id]) {
+                    if (vis[n]) continue;
+                    if (_partition[pi].size() == C) continue;
+                    _partition[pi].push_back(n);
+                    id2pid[n] = pi;
+                    if (visit_feq_num < 1000) lock_id[cur_id] = 1; 
+                    vis[n] = 1;
+            }
+            }
+        }
+    }
+    void graph_partition(const char *filename, int k, int strategy = 0, const char *rearr_vamana_file ="" ,  int sample_num = 3, int dn = 0)
     {
         for (int i = 0; i < nd; i++)
         {
@@ -1219,6 +1270,46 @@ public:
         _partition.resize(_partition_number);
         if (true)
         {
+            if (strategy == 0){
+                for (int i = 0; i < k; i++){
+                    select_free=0;
+                    graph_partition_ivf();
+                    std::cout << "select free: "<<(double)select_free/_partition_number << std::endl;
+                    partition_statistic();
+                    auto ivf_file_name = std::string(filename) + std::string(".ivf") + std::to_string(i + 1);
+                    std::cout << "total ivf time: " << ivf_time << std::endl;
+                    save_partition(ivf_file_name.c_str());
+                    round++;
+                }
+            }
+            else if (strategy == 1){
+                init2_id2pid(strategy);
+                 
+}
+            else if (strategy == 3){
+                init2_id2pid(strategy);
+                for (unsigned i = 0; i < nd; i++) {
+                if (lock_id[i]) {
+                    for (auto each_id: _partition[id2pid[i]]) {
+                        lock_id[each_id] = 1;
+                    }
+                }
+                }
+                load_vamana(rearr_vamana_file, true, sample_num);      
+                for (int i = 0; i < k; i++) {
+                    select_free = 0;
+                    graph_partition_ivf();
+                    std::cout << "select free: " << (double) select_free / _partition_number << std::endl;
+                    partition_statistic();
+                    print_visited_neighbor_freq();
+                    auto ivf_file_name = std::string(filename) + std::string(".ivf") + std::to_string(i + 1);
+                    std::cout << "total ivf time: " << ivf_time << std::endl;
+                    save_partition(ivf_file_name.c_str());
+                    round++;
+                }
+                re_partition(); 
+            }
+
             std::unordered_set<unsigned> vis;
             for (unsigned i = 0; i < _partition_number; i++)
             {
@@ -1232,17 +1323,7 @@ public:
             // save_partition(ivf_file_name.c_str());
         }
         // load_partition("../bigann/DEEP_10M_R48_L128_B0.225_greed");
-        for (int i = 0; i < k; i++)
-        {
-            select_free=0;
-            graph_partition_ivf();
-            std::cout << "select free: "<<(double)select_free/_partition_number << std::endl;
-            partition_statistic();
-            auto ivf_file_name = std::string(filename) + std::string(".ivf") + std::to_string(i + 1);
-            std::cout << "total ivf time: " << ivf_time << std::endl;
-            save_partition(ivf_file_name.c_str());
-            round++;
-        }
+        
         std::cout << "select pid nums" << select_nums << " get unfilled partition nums: " << getUnfilled_nums << std::endl;
         std::cout << "total ivf time: " << ivf_time << std::endl;
         std::bitset<10000000>bs;
@@ -1308,6 +1389,7 @@ public:
         {
             // debug();
             size_t n = stream[i];
+            if (lock_id[n]) continue;
             sync(n);
             // unsigned pid = select_partition(i);
             // pmutex[pid]->lock();
@@ -1831,8 +1913,138 @@ public:
         }
         std::cout << "select free per partition "<<(double)select_free / _partition_number << std::endl;
     }
-    
 
+    struct CompareByFirst {
+        constexpr bool operator()(std::pair<unsigned, unsigned> const &a,
+                                    std::pair<unsigned, unsigned> const &b) const noexcept {
+            return a.second < b.second;
+        }
+    };
+
+    void rearrange_vamana(char *vamana_file, char *freq_file, char *rearranged_vamana){
+        Index index(_dim, nd);
+        omp_set_num_threads(1);
+
+        auto s = std::chrono::high_resolution_clock::now();
+        index.load_vamana(vamana_file);
+        index.stat_neighbor_frequency(freq_file);
+        index.save_vamana_index(rearranged_vamana);
+
+        auto e = std::chrono::high_resolution_clock::now();
+
+        std::chrono::duration<double> diff = e -s;
+        std::cout<< "partition time: "<< diff.count() << std::endl;
+        
+    }
+    
+    void rearrangement_neighbor (std::vector<std::priority_queue<std::pair<unsigned, unsigned>, std::vector<std::pair<unsigned, unsigned>>, 
+                        CompareByFirst>>& visited_neighbor_count) {
+        _final_graph = direct_graph;
+        for (int i = 0; i < nd; i++) {
+            if (!visited_neighbor_count[i].empty()) {
+                std::unordered_map <unsigned, bool> neighbor_tmp;
+                for (auto& each_neigh: _final_graph[i]) {
+                    neighbor_tmp[each_neigh] = true;
+                }
+                _final_graph[i].clear();
+                while (!visited_neighbor_count[i].empty()) {
+                    _final_graph[i].push_back(visited_neighbor_count[i].top().first);
+                    neighbor_tmp[visited_neighbor_count[i].top().first] = false;
+                    visited_neighbor_count[i].pop();
+                }
+                for (auto& tmp_res : neighbor_tmp) {
+                    if (tmp_res.second) {
+                        _final_graph[i].push_back(tmp_res.first);
+                    }
+                }
+            }
+            assert(_final_graph[i].size() == _width);
+        }
+
+    }
+    // This is a function for read frequency
+    void stat_neighbor_frequency(const char *filename) {
+        std::vector<std::priority_queue<std::pair<unsigned, unsigned>, std::vector<std::pair<unsigned, unsigned>>, 
+                    CompareByFirst> > visited_neighbor_count;
+
+        std::ifstream reader(filename, std::ios::binary | std::ios::out);
+        std::cout << "read visited neighbors information: " << filename << std::endl;
+        unsigned num = 0;
+        reader.read((char *)&num, 4);
+        visited_neighbor_count.resize(num);
+        unsigned tmp_count = 0;
+        unsigned n_size = 0;
+        assert(num == nd);
+        for (size_t i = 0; i < num; i++){
+            unsigned v_freq = 0;
+            reader.read((char *)v_freq, sizeof(unsigned));
+            visited_freq.emplace(std::make_pair(i, v_freq));
+        }
+        for (size_t i = 0; i < num; i++){
+            reader.read((char *) &n_size, sizeof(unsigned));
+            for  (size_t j = 0; j < n_size; j++){
+                unsigned nbr_id, visit_nbr_id_freq;
+                reader.read((char *)&nbr_id, sizeof(unsigned));
+                reader.read((char *)&visit_nbr_id_freq, sizeof(unsigned));
+                visited_neighbor_count[i].emplace(std::make_pair(visit_nbr_id_freq, nbr_id));                
+            }
+        }
+        rearrangement_neighbor(visited_neighbor_count);
+    
+    }
+    void save_vamana_index(const char *filename) {
+        long long     total_gr_edges = 0;
+        size_t        index_size = 0;
+        std::ofstream out;
+        out.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+
+        out.open(std::string(filename), std::ios::binary | std::ios::out);
+        out.write((char *) &index_size, sizeof(uint64_t));
+        out.write((char *) &_width, sizeof(unsigned));
+        out.write((char *) &_ep, sizeof(unsigned));
+        for (unsigned i = 0; i < nd; i++) {
+            unsigned GK = (unsigned) _final_graph[i].size();
+            out.write((char *) &GK, sizeof(unsigned));
+            out.write((char *) _final_graph[i].data(), GK * sizeof(unsigned));
+            total_gr_edges += GK;
+        }
+        index_size = out.tellp();
+        out.seekp(0, std::ios::beg);
+        out.write((char *) &index_size, sizeof(uint64_t));
+        out.close();
+
+        std::cout << "Avg degree: "
+                    << ((float) total_gr_edges) /
+                            ((float) (nd))
+                    << std::endl;
+    }
+
+    void print_visited_neighbor_freq () {
+
+        std::priority_queue<std::pair<unsigned, unsigned>, std::vector<std::pair<unsigned, unsigned>>,
+                CompareByFirst> visited_freq_tmp(visited_freq);
+        std::vector<std::priority_queue<std::pair<unsigned, unsigned>, std::vector<std::pair<unsigned, unsigned>>,
+                CompareByFirst> > visited_neighbor_count_tmp(visited_neighbor_count.begin(), visited_neighbor_count.end());
+        int T = 1000;
+        unsigned t_freq = 0;
+        unsigned tt_freq = 0;
+        while(visited_freq_tmp.top().second != 0) {
+            std::priority_queue<std::pair<unsigned, unsigned>, std::vector<std::pair<unsigned, unsigned>>,
+                    CompareByFirst> tmp;
+            while(!visited_neighbor_count_tmp[visited_freq_tmp.top().first].empty()) {
+               
+                if (id2pid[visited_freq_tmp.top().first] == id2pid[visited_neighbor_count_tmp[visited_freq_tmp.top().first].top().first])
+                    t_freq += visited_neighbor_count_tmp[visited_freq_tmp.top().first].top().second;
+                tt_freq += visited_neighbor_count_tmp[visited_freq_tmp.top().first].top().second;
+                visited_neighbor_count_tmp[visited_freq_tmp.top().first].pop();
+            }
+            visited_freq_tmp.pop();
+        }
+        std::cout << "Total I/Os: " << tt_freq << std::endl;
+        std::cout << "Theoretical_grain: " << (float) t_freq / (float) tt_freq << std::endl;
+    }
+
+    
     size_t _dim; // vector dimension
     _u64 nd;    // vector number
     _u64 max_node_len;
@@ -1853,6 +2065,7 @@ public:
     int cur = 0;
     std::vector<std::vector<unsigned>> reverse_graph;
     std::vector<std::vector<unsigned>> undirect_graph;
+    std::vector<std::vector<unsigned>> _final_graph; // for generate rearranged_vamana, a neighbor list
     std::unordered_map<unsigned, unsigned> id2pid;
     std::unordered_map<unsigned, unsigned> id2ratio;
     std::unordered_map<unsigned, bool> unfilled_partition;
@@ -1880,5 +2093,10 @@ public:
    concurrent_queue free_q;
    std::unordered_set<unsigned> fix_node;
    std::unordered_map<unsigned, ListNode*> id2ptr;
+   std::vector<std::priority_queue<std::pair<unsigned, unsigned>, std::vector<std::pair<unsigned, unsigned>>,
+            CompareByFirst> > visited_neighbor_count;
+    std::priority_queue<std::pair<unsigned, unsigned>, std::vector<std::pair<unsigned, unsigned>>,
+                    CompareByFirst> visited_freq;  
+    std::vector<unsigned> lock_id;
 };
 #endif // SSD_BASED_PLAN_INDEX_H

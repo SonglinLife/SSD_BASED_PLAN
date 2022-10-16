@@ -8,10 +8,18 @@ ssnpp_10M="/data/wsl/SSD_Based_Plan/bigann/SSNPP_ORG_R48_L128_B0.6_M32_disk.inde
 sift_10M_R32="/data/wsl/SSD_Based_Plan/bigann/SIFT_10M_R32_L96_B0.3_disk.index"
 
 index=$deep_10M
+freq_file=
+ori_vamana_file=
+rearr_vamana_file=
+
 dim=96
 data_type=float
 nd=10000000
+
+neigh_freq_file=""
+
+
 gp_file=./gpfile/deep_10m_r48_rb1
-./SSD_Based_Plan $dim $nd $index $data_type $gp_file 64 16 0 1 1 #>> ${gp_file}.log
+./SSD_Based_Plan $dim $nd $index $data_type $gp_file $freq_file $ori_vamana_file $rearr_vamana_file 64 16 0 1 1 1 #>> ${gp_file}.log
 
 
