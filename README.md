@@ -39,7 +39,22 @@ cmake --build build --target SSD_Based_Plan -j8
 
 `blocksize` set 1, the parition block size would be 4KB, set 2 would be 8KB, and so on
 
+#optional 
+`strategy` set 0, the partition would not consider frequency, set 1 would use strategy 1, set 3 would use strategy 3
+
+`origin_vamana_file` the original vamana file name
+
+`freq_file` the frequency file name
+
+`rearr_vamana_file` the rearranged vamana file would be stored in there
+
+`sample_num` the number of neighbors, which have the highest frequency to each node, would be taken into consider in strategy 3
+
 use like 
+
+```
+./Rearrange_vamana ${origin_vamana_file} ${freq_file} ${rearr_vamana_file} $nd $dim
+```
 
 ```
 ./SSD_Based_Plan 96 10000000 /data/wsl/diskann_re/build/tests/index/DEEP_10M_R48_L128_B0.225_disk.index_cp float ./gpfile/deep_10m_r48_rb1 64 16 0 1 1

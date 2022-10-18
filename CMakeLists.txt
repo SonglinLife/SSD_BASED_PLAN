@@ -13,7 +13,9 @@ else()
 endif()
 
 add_executable(SSD_Based_Plan main.cpp)
+add_executable(Rearrange_vamana rearr_vamana.cpp)
 
 set(TBB_TEST OFF CACHE BOOL "TBB Test" FORCE)
 add_subdirectory(oneTBB)
 target_link_libraries(SSD_Based_Plan PUBLIC tbb)
+target_link_libraries(Rearrange_vamana PUBLIC tbb)
