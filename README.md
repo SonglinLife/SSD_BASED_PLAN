@@ -43,18 +43,22 @@ lock_nums=1000000
 ```
 ./partitioner --h
 
--h [ --help ]                print information
---data_type arg              data type <int8/uint8/float>
---index_file arg             diskann diskann index or mem index
---gp_file arg                output gp file
---freq_file arg              freq_file
--N [ --npts ] arg            data size
--D [ --dim ] arg             data vector dim
---lock_nums arg (=0)         lock node nums
--B [ --block_size ] arg (=1) block size for one partition
--L [ --ldg_times ] arg (=4)  exec ldg partition alg times
--A [ --alg ] arg (=0)        algorithm for graph Partition
---use_disk arg (=1)          Use 1 for use disk index (default), 0 for 
-                             DiskANN mem index
---visual arg (=0)            see real time progress of
+  -h [ --help ]                  print information
+  --data_type arg                data type <int8/uint8/float>
+  --index_file arg               diskann diskann index or mem index
+  --gp_file arg                  output gp file
+  --freq_file arg                freq_file[optional]
+  -N [ --npts ] arg              data size, like: --npts 1000000
+  -D [ --dim ] arg               data vector dim, like: --dim 128
+  -T [ --thread_nums ] arg (=64) threads_nums
+  --lock_nums arg (=0)           lock node nums, the lock nodes will not 
+                                 participate in the follow LDG paritioning
+  -B [ --block_size ] arg (=1)   block size for one partition, 1 for 4KB, 2 for
+                                 8KB and so on.
+  -L [ --ldg_times ] arg (=4)    exec ldg partition alg times, usually 8 is 
+                                 enough.
+  --use_disk arg (=1)            Use 1 for use disk index (default), 0 for 
+                                 DiskANN mem index
+  --visual arg (=0)              see real time progress of graph partition
+  --sample arg (=0)              cut adj list
 ```
