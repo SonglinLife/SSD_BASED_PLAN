@@ -11,13 +11,13 @@ namespace GP {
 using puu = std::pair<unsigned, unsigned>;
 using vpu = std::vector<std::vector<puu>>;
 using vvu = std::vector<std::vector<unsigned>>;
-void read_freq(std::vector<puu> freq_list, vpu &freq_nei_list, std::string freq_file) {
+void read_freq(std::vector<puu>& freq_list, vpu &freq_nei_list, std::string freq_file) {
   std::ifstream reader(freq_file, std::ios::binary | std::ios::out);
   std::cout << "read visited neighbors information: " << freq_file << std::endl;
   unsigned num = 0;
   reader.read((char *)&num, 4);
   freq_list.clear();
-  freq_list.resize(num);
+  freq_list.reserve(num);
   freq_nei_list.clear();
   freq_nei_list.resize(num);
   unsigned n_size = 0;
@@ -27,7 +27,7 @@ void read_freq(std::vector<puu> freq_list, vpu &freq_nei_list, std::string freq_
     freq_list.emplace_back(puu(i, v_freq));
   }
   std::sort(freq_list.begin(), freq_list.end(),
-            [](puu &left, puu &right) -> bool { return left.second >= right.second; });
+            [](puu &left, puu &right) -> bool { return left.second > right.second; });
   for (size_t i = 0; i < num; i++) {
     reader.read((char *)&n_size, sizeof(unsigned));
     freq_nei_list[i].reserve(n_size);
@@ -46,7 +46,7 @@ void relayout_adj(vpu &freq_nei_list, vvu &graph) {
 #pragma omp parallel for schedule(dynamic, 1000) private(tmp_adj, vis)
   for (unsigned i = 0; i < graph.size(); i++) {
     std::sort(freq_nei_list[i].begin(), freq_nei_list[i].end(),
-              [](puu &left, puu &right) -> bool { return left.second >= right.second; });
+              [](puu &left, puu &right) -> bool { return left.second > right.second; });
     tmp_adj.clear();
     vis.clear();
     for (auto v : freq_nei_list[i]) {
@@ -58,8 +58,9 @@ void relayout_adj(vpu &freq_nei_list, vvu &graph) {
       vis.insert(v);
       tmp_adj.emplace_back(v);
     }
-    if (graph.size() != tmp_adj.size()) {
+    if (graph[i].size() != tmp_adj.size()) {
       std::cout << "this freq info is worong, the freq file gen by diff graph" << std::endl;
+      exit(-1);
     }
     graph[i].swap(tmp_adj);
   }

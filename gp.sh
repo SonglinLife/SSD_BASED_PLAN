@@ -14,6 +14,6 @@ nd=10000000
 mkdir -p ./gpfile
 gp_file=./gpfile/deep_10m_r48_rb1
 lock_nums=1000000
-./build/partitioner --data_type $data_type --index_file $index --gp_file $gp_file -N $nd -D $dim -L 16 --lock_nums $lock_nums
+./build/partitioner --data_type $data_type --index_file $index --gp_file $gp_file -N $nd -D $dim -L 16 --lock_nums $lock_nums --visual 1
 #>> ${gp_file}.log
 

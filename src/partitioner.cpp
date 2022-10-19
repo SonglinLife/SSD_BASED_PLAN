@@ -15,7 +15,7 @@
 int main(int argc, char **argv) {
   namespace po = boost::program_options;
   std::string index_file, data_type, gp_file, freq_file;
-  unsigned npts, dim, block_size, ldg_times, lock_nums, alg;
+  unsigned npts, dim, block_size, ldg_times, lock_nums, thead_nums;
   bool use_disk, visual, sample;
 
   po::options_description desc{"Arguments"};
@@ -25,15 +25,15 @@ int main(int argc, char **argv) {
     desc.add_options()("index_file", po::value<std::string>(&index_file)->required(),
                        "diskann diskann index or mem index");
     desc.add_options()("gp_file", po::value<std::string>(&gp_file)->required(), "output gp file");
-    desc.add_options()("freq_file", po::value<std::string>(&freq_file)->default_value(""), "freq_file");
-    desc.add_options()("npts,N", po::value<unsigned>(&npts)->required(), "data size");
-    desc.add_options()("dim,D", po::value<unsigned>(&dim)->required(), "data vector dim");
-    desc.add_options()("lock_nums", po::value<unsigned>(&lock_nums)->default_value(0), "lock node nums");
+    desc.add_options()("freq_file", po::value<std::string>(&freq_file)->default_value(""), "freq_file[optional]");
+    desc.add_options()("npts,N", po::value<unsigned>(&npts)->required(), "data size, like: --npts 1000000");
+    desc.add_options()("dim,D", po::value<unsigned>(&dim)->required(), "data vector dim, like: --dim 128");
+    desc.add_options()("thread_nums,T", po::value<unsigned>(&thead_nums)->default_value(omp_get_num_procs()), "threads_nums");
+    desc.add_options()("lock_nums", po::value<unsigned>(&lock_nums)->default_value(0), "lock node nums, the lock nodes will not participate in the follow LDG paritioning");
     desc.add_options()("block_size,B", po::value<unsigned>(&block_size)->default_value(1),
-                       "block size for one partition");
+                       "block size for one partition, 1 for 4KB, 2 for 8KB and so on.");
     desc.add_options()("ldg_times,L", po::value<unsigned>(&ldg_times)->default_value(4),
-                       "exec ldg partition alg times");
-    desc.add_options()("alg,A", po::value<unsigned>(&alg)->default_value(0), "algorithm for graph Partition");
+                       "exec ldg partition alg times, usually 8 is enough.");
     desc.add_options()("use_disk", po::value<bool>(&use_disk)->default_value(1),
                        "Use 1 for use disk index (default), 0 for DiskANN mem index");
     desc.add_options()("visual", po::value<bool>(&visual)->default_value(0),
@@ -50,6 +50,7 @@ int main(int argc, char **argv) {
   } catch (const std::exception &ex) {
     std::cerr << ex.what() << "\n";
   }
+  omp_set_num_threads(thead_nums);
   GP::graph_partitoner partitioner(npts, dim, index_file.c_str(), data_type.c_str(), use_disk, block_size, sample,
                                    visual, freq_file);
   partitioner.graph_partition(gp_file.c_str(), ldg_times, lock_nums);
