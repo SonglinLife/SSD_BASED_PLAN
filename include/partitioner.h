@@ -96,11 +96,11 @@ std::pair<bool, std::vector<_u64>> get_disk_index_meta(const std::string &path) 
   return {is_new_version, metas};
 }
 
-class graph_partitoner {
+class graph_partitioner {
  public:
-  graph_partitoner(const unsigned npts, const unsigned dim, const char *indexName, const char *data_type = "uint8",
-                   bool load_disk = true, unsigned BS = 1, bool sample = false, bool visual = false,
-                   std::string freq_file = std::string(""), unsigned lock_nodes = 0) {
+  graph_partitioner(const unsigned npts, const unsigned dim, const char *indexName, const char *data_type = "uint8",
+                    bool load_disk = true, unsigned BS = 1, bool visual = false,
+                    std::string freq_file = std::string(""), unsigned cut = INF) {
     _visual = visual;
     std::srand(static_cast<unsigned int>(std::time(nullptr)));
 
@@ -135,7 +135,7 @@ class graph_partitoner {
         exit(-1);
       }
     } else {
-      load_vamana(indexName, sample);
+      load_vamana(indexName);
     }
     cursize = _nd / 1000;
 
@@ -150,8 +150,56 @@ class graph_partitoner {
                   << std::endl;
         exit(-1);
       }
-      relayout_adj(_freq_nei_list, direct_graph);
+      relayout_adj(_freq_nei_list, full_graph);
     }
+    // copy to direct_graph
+    direct_graph.clear();
+    direct_graph.resize(full_graph.size());
+#pragma omp parallel for
+    for (unsigned i = 0; i < _nd; i++) {
+      direct_graph[i].assign(full_graph[i].begin(), full_graph[i].end());
+    }
+    // cut graph
+    if(cut !=INF){
+      std::cout << "direct graph will be cut, it degree become "<<cut << std::endl;
+    }
+#pragma omp parallel for
+    for (unsigned i = 0; i < _nd; i++) {
+      if (cut < direct_graph[i].size()) {
+        direct_graph[i].resize(cut);
+      }
+    }
+    // reverse graph
+    std::vector<std::mutex> ms(_nd);
+    reverse_graph.resize(_nd);
+#pragma omp parallel for shared(reverse_graph, direct_graph)
+    for (unsigned i = 0; i < _nd; i++) {
+      for (unsigned j = 0; j < direct_graph[i].size(); j++) {
+        std::lock_guard<std::mutex> lock(ms[direct_graph[i][j]]);
+        reverse_graph[direct_graph[i][j]].emplace_back(i);
+      }
+    }
+    std::cout << "reverse graph done." << std::endl;
+    for (unsigned i = 0; i < _partition_number; i++) {
+      pmutex.push_back(std::make_unique<std::mutex>());
+    }
+    //   undirect_graph.resize(_nd);
+    //     E = 0;
+    // #pragma omp parallel for schedule(dynamic, 100)
+    //     for (unsigned i = 0; i < _nd; i++) {
+    //       std::set<unsigned> ne;
+    //       for (auto n : direct_graph[i]) {
+    //         ne.insert(n);
+    //       }
+    //       for (auto n : reverse_graph[i]) {
+    //         ne.insert(n);
+    //       }
+    //       for (auto n : ne) {
+    //         undirect_graph[i].push_back(n);
+    //       }
+    // #pragma omp atomic
+    //       E += undirect_graph[i].size();
+    //     }
   }
 
   void cout_step() {
@@ -260,7 +308,7 @@ class graph_partitoner {
       in.seekg(SECTOR_LEN, std::ios::beg);
       in.read(mem_index.get(), _partition_number * SECTOR_LEN);
       in.close();
-      direct_graph.resize(_nd);
+      full_graph.resize(_nd);
       _u64 des = 0;
 #pragma omp parallel for schedule(dynamic, 1) reduction(+ : des)
       for (unsigned i = 0; i < _partition_number; i++) {
@@ -274,45 +322,14 @@ class graph_partitoner {
           std::vector<unsigned> tmp(nnbr);
           des += nnbr;
           memcpy((char *)tmp.data(), nhood_buf, nnbr * sizeof(unsigned));
-          direct_graph[i * C + j].assign(tmp.begin(), tmp.end());
+          full_graph[i * C + j].assign(tmp.begin(), tmp.end());
         }
       }
       std::cout << "avg degree: " << (double)des / _nd << std::endl;
       mem_index.reset();
-      std::vector<std::mutex> ms(_nd);
-      reverse_graph.resize(_nd);
-#pragma omp parallel for shared(reverse_graph, direct_graph)
-      for (unsigned i = 0; i < _nd; i++) {
-        for (unsigned j = 0; j < direct_graph[i].size(); j++) {
-          std::lock_guard<std::mutex> lock(ms[direct_graph[i][j]]);
-          reverse_graph[direct_graph[i][j]].emplace_back(i);
-        }
-      }
-      undirect_graph.resize(_nd);
-      E = 0;
-#pragma omp parallel for schedule(dynamic, 100)
-      for (unsigned i = 0; i < _nd; i++) {
-        std::set<unsigned> ne;
-        for (auto n : direct_graph[i]) {
-          ne.insert(n);
-        }
-        for (auto n : reverse_graph[i]) {
-          ne.insert(n);
-        }
-        for (auto n : ne) {
-          undirect_graph[i].push_back(n);
-        }
-#pragma omp atomic
-        E += undirect_graph[i].size();
-      }
-      for (unsigned i = 0; i < _nd; i++) {
-      }
       C = (SECTOR_LEN * BS) / _max_node_len;
       _partition_number = ROUND_UP(_nd, C) / C;
       std::cout << "_nd: " << _nd << " _dim:" << _dim << " C:" << C << " pn:" << _partition_number << std::endl;
-      for (unsigned i = 0; i < _partition_number; i++) {
-        pmutex.push_back(std::make_unique<std::mutex>());
-      }
       std::cout << "load index over." << std::endl;
     } catch (std::system_error &e) {
       std::cout << "open file " << index_name << " error!" << std::endl;
@@ -394,9 +411,9 @@ class graph_partitoner {
       std::unordered_set<unsigned> neighbors;
       unsigned blk_neighbor_num = 0;
       for (size_t j = 0; j < _partition[i].size(); j++) {
-        blk_neighbor_num += direct_graph[_partition[i][j]].size();
+        blk_neighbor_num += full_graph[_partition[i][j]].size();
         std::unordered_set<unsigned> ne;
-        for (unsigned &x : direct_graph[_partition[i][j]]) {
+        for (unsigned &x : full_graph[_partition[i][j]]) {
           neighbors.insert(x);
           ne.insert(x);
         }
@@ -528,7 +545,7 @@ class graph_partitoner {
       if (lock_nums > 0) {
         _lock_pids[pid] = true;
       }
-      for (unsigned s : direct_graph[i]) {
+      for (unsigned s : full_graph[i]) {
         if (vis.count(s)) continue;
         if (_partition[pid].size() == C) {
           ++pid;
@@ -623,6 +640,7 @@ class graph_partitoner {
   unsigned _width;                                  // max out-degree
   unsigned _ep;                                     // seed vertex id
   std::vector<std::vector<unsigned>> direct_graph;  // neighbor list
+  std::vector<std::vector<unsigned>> full_graph;
   unsigned select_free;
   _u64 C;                                                  // partition size threshold
   _u64 _partition_number = 0;                              // the number of partitions

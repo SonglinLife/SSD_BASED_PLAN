@@ -60,5 +60,6 @@ lock_nums=1000000
   --use_disk arg (=1)            Use 1 for use disk index (default), 0 for 
                                  DiskANN mem index
   --visual arg (=0)              see real time progress of graph partition
-  --sample arg (=0)              cut adj list
+  --cut arg (=4294967295)        cut adj list, use 3 means graph degree will be
+                                 cut to 3
 ```

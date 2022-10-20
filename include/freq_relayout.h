@@ -40,11 +40,11 @@ void read_freq(std::vector<puu>& freq_list, vpu &freq_nei_list, std::string freq
   }
 }
 
-void relayout_adj(vpu &freq_nei_list, vvu &graph) {
+void relayout_adj(vpu &freq_nei_list, vvu &full_graph) {
   std::vector<unsigned> tmp_adj(100);
   std::unordered_set<unsigned> vis;
 #pragma omp parallel for schedule(dynamic, 1000) private(tmp_adj, vis)
-  for (unsigned i = 0; i < graph.size(); i++) {
+  for (unsigned i = 0; i < full_graph.size(); i++) {
     std::sort(freq_nei_list[i].begin(), freq_nei_list[i].end(),
               [](puu &left, puu &right) -> bool { return left.second > right.second; });
     tmp_adj.clear();
@@ -53,16 +53,16 @@ void relayout_adj(vpu &freq_nei_list, vvu &graph) {
       tmp_adj.emplace_back(v.first);
       vis.insert(v.first);
     }
-    for (auto v : graph[i]) {
+    for (auto v : full_graph[i]) {
       if (vis.count(v)) continue;
       vis.insert(v);
       tmp_adj.emplace_back(v);
     }
-    if (graph[i].size() != tmp_adj.size()) {
+    if (full_graph[i].size() != tmp_adj.size()) {
       std::cout << "this freq info is worong, the freq file gen by diff graph" << std::endl;
       exit(-1);
     }
-    graph[i].swap(tmp_adj);
+    full_graph[i].swap(tmp_adj);
   }
 }
 }  // namespace GP
