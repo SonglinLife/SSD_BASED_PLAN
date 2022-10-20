@@ -4,8 +4,9 @@ set(CMAKE_CXX_STANDARD 17)
 include_directories(include)
 
 #tbb
-add_subdirectory(oneTBB)
 set(TBB_TEST OFF CACHE BOOL "TBB Test" FORCE)
+add_subdirectory(oneTBB)
+
 
 # OpenMP
 find_package(OpenMP REQUIRED)
