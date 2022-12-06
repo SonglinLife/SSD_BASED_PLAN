@@ -15,7 +15,7 @@
 int main(int argc, char **argv) {
   namespace po = boost::program_options;
   std::string index_file, data_type, gp_file, freq_file;
-  unsigned npts, dim, block_size, ldg_times, lock_nums, thead_nums, cut;
+  unsigned block_size, ldg_times, lock_nums, thead_nums, cut;
   bool use_disk, visual;
 
   po::options_description desc{"Arguments"};
@@ -26,8 +26,6 @@ int main(int argc, char **argv) {
                        "diskann diskann index or mem index");
     desc.add_options()("gp_file", po::value<std::string>(&gp_file)->required(), "output gp file");
     desc.add_options()("freq_file", po::value<std::string>(&freq_file)->default_value(""), "freq_file[optional]");
-    desc.add_options()("npts,N", po::value<unsigned>(&npts)->required(), "data size, like: --npts 1000000");
-    desc.add_options()("dim,D", po::value<unsigned>(&dim)->required(), "data vector dim, like: --dim 128");
     desc.add_options()("thread_nums,T", po::value<unsigned>(&thead_nums)->default_value(omp_get_num_procs()),
                        "threads_nums");
     desc.add_options()("lock_nums", po::value<unsigned>(&lock_nums)->default_value(0),
@@ -53,7 +51,7 @@ int main(int argc, char **argv) {
     std::cerr << ex.what() << "\n";
   }
   omp_set_num_threads(thead_nums);
-  GP::graph_partitioner partitioner(npts, dim, index_file.c_str(), data_type.c_str(), use_disk, block_size, visual,
+  GP::graph_partitioner partitioner(index_file.c_str(), data_type.c_str(), use_disk, block_size, visual,
                                     freq_file, cut);
   partitioner.graph_partition(gp_file.c_str(), ldg_times, lock_nums);
   return 0;

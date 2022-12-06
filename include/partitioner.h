@@ -98,7 +98,7 @@ std::pair<bool, std::vector<_u64>> get_disk_index_meta(const std::string &path) 
 
 class graph_partitioner {
  public:
-  graph_partitioner(const unsigned npts, const unsigned dim, const char *indexName, const char *data_type = "uint8",
+  graph_partitioner(const char *indexName, const char *data_type = "uint8",
                     bool load_disk = true, unsigned BS = 1, bool visual = false,
                     std::string freq_file = std::string(""), unsigned cut = INF) {
     _visual = visual;
@@ -117,10 +117,6 @@ class graph_partitioner {
       std::cout << "index file not match!" << std::endl;
       exit(-1);
     }
-
-    _nd = npts;
-    _dim = dim;
-    std::cout << "partition index has npts: " << _nd << " dim: " << _dim << std::endl;
 
     _rd = new std::random_device();
     _gen = new std::mt19937((*_rd)());
@@ -285,7 +281,7 @@ class graph_partitioner {
     in.exceptions(std::ifstream::failbit | std::ifstream::badbit);
 
     try {
-      _u64 expected_npts = 0;
+      _u64 expected_npts;
       auto meta_pair = get_disk_index_meta(index_name);
 
       if (meta_pair.first) {
@@ -294,9 +290,8 @@ class graph_partitioner {
       } else {
         expected_npts = meta_pair.second[1];
       }
-      if (_nd != expected_npts) {
-        std::cout << "given npts is " << _nd << "but the index file has npts " << expected_npts << std::endl;
-      }
+      _nd = expected_npts;
+      _dim = meta_pair.second[1];
 
       _max_node_len = meta_pair.second[3];
       C = meta_pair.second[4];
