@@ -23,3 +23,5 @@ find_package(Boost COMPONENTS program_options REQUIRED)
 add_executable(partitioner src/partitioner.cpp)
 target_link_libraries(partitioner PUBLIC tbb Boost::program_options)
 
+add_executable(stats src/stats.cpp)
+target_link_libraries(stats PUBLIC tbb Boost::program_options)

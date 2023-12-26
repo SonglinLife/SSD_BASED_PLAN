@@ -5,6 +5,7 @@
 
 #include <omp.h>
 #include <oneapi/tbb/concurrent_queue.h>
+#include <oneapi/tbb/concurrent_set.h>
 #include <algorithm>
 #include <atomic>
 #include <bitset>
@@ -98,7 +99,7 @@ std::pair<bool, std::vector<_u64>> get_disk_index_meta(const std::string &path) 
 
 class graph_partitioner {
  public:
-  graph_partitioner(const char *indexName, const char *data_type = "uint8",
+  graph_partitioner(const char *indexName, const char *data_type = "uint8", unsigned fixed_ratio = 0,
                     bool load_disk = true, unsigned BS = 1, bool visual = false,
                     std::string freq_file = std::string(""), unsigned cut = INF) {
     _visual = visual;
@@ -156,8 +157,8 @@ class graph_partitioner {
       direct_graph[i].assign(full_graph[i].begin(), full_graph[i].end());
     }
     // cut graph
-    if(cut !=INF){
-      std::cout << "direct graph will be cut, it degree become "<<cut << std::endl;
+    if (cut != INF) {
+      std::cout << "direct graph will be cut, it degree become " << cut << std::endl;
     }
 #pragma omp parallel for
     for (unsigned i = 0; i < _nd; i++) {
@@ -165,6 +166,13 @@ class graph_partitioner {
         direct_graph[i].resize(cut);
       }
     }
+// cout graph E num 
+    size_t _ep = 0;
+#pragma omp parallel for reduction(+ : _ep) 
+    for (unsigned i = 0; i < _nd; i++) {
+      _ep += direct_graph[i].size();
+    }
+    std::cout << "graph vertex size: " << _nd << " graph edge size: " << _ep << std::endl;
     // reverse graph
     std::vector<std::mutex> ms(_nd);
     reverse_graph.resize(_nd);
@@ -179,23 +187,10 @@ class graph_partitioner {
     for (unsigned i = 0; i < _partition_number; i++) {
       pmutex.push_back(std::make_unique<std::mutex>());
     }
-    //   undirect_graph.resize(_nd);
-    //     E = 0;
-    // #pragma omp parallel for schedule(dynamic, 100)
-    //     for (unsigned i = 0; i < _nd; i++) {
-    //       std::set<unsigned> ne;
-    //       for (auto n : direct_graph[i]) {
-    //         ne.insert(n);
-    //       }
-    //       for (auto n : reverse_graph[i]) {
-    //         ne.insert(n);
-    //       }
-    //       for (auto n : ne) {
-    //         undirect_graph[i].push_back(n);
-    //       }
-    // #pragma omp atomic
-    //       E += undirect_graph[i].size();
-    //     }
+    if (fixed_ratio != 0) {
+      // make a random vector from 0 to np, the vector size is _nd * fixed_ratio / 100
+      _fixed_sz = _nd * fixed_ratio / 100;
+    }
   }
 
   void cout_step() {
@@ -339,6 +334,7 @@ class graph_partitioner {
    * @param partition
    */
   void save_partition(const char *filename) {
+    // 正确性测试
     // re_id2pid();
     std::ofstream writer(filename, std::ios::binary | std::ios::out);
     std::cout << "writing bin: " << filename << std::endl;
@@ -346,15 +342,17 @@ class graph_partitioner {
     writer.write((char *)&_partition_number, sizeof(_u64));
     writer.write((char *)&_nd, sizeof(_u64));
     std::cout << "_partition_num: " << _partition_number << " C: " << C << " _nd: " << _nd << std::endl;
+  
     for (unsigned i = 0; i < _partition_number; i++) {
-      auto p = _partition[i];
-      unsigned s = p.size();
+      auto& p = _partition[i];
+      unsigned s = _sizes[i].load();
+    
       writer.write((char *)&s, sizeof(unsigned));
       writer.write((char *)p.data(), sizeof(unsigned) * s);
     }
     std::vector<unsigned> id2pidv(_nd);
-    for (auto n : id2pid) {
-      id2pidv[n.first] = n.second;
+    for(size_t i = 0; i < _nd; i++) {
+      id2pidv[i] = _labels[i];
     }
     writer.write((char *)id2pidv.data(), sizeof(unsigned) * _nd);
   }
@@ -369,21 +367,18 @@ class graph_partitioner {
     reader.read((char *)&_partition_number, sizeof(_u64));
     reader.read((char *)&_nd, sizeof(_u64));
     std::cout << "load partition _partition_num: " << _partition_number << ", C: " << C << std::endl;
-    _partition.clear();
-    auto tmp = new unsigned[C];
+    _partition.resize(_partition_number);
+    _sizes = (std::atomic<unsigned> *)malloc(sizeof(std::atomic<unsigned>) * _partition_number);
+    new (_sizes) std::atomic<unsigned>[ _partition_number ];
     for (unsigned i = 0; i < _partition_number; i++) {
       unsigned c;
       reader.read((char *)&c, sizeof(unsigned));
-      reader.read((char *)tmp, c * sizeof(unsigned));
-      std::vector<unsigned> tt;
-      tt.reserve(C);
-      for (unsigned j = 0; j < c; j++) {
-        tt.push_back(*(tmp + j));
-      }
-      _partition.push_back(tt);
+      _partition[i].resize(c);
+      _sizes[i].store(c);
+      reader.read((char *)_partition[i].data(), sizeof(unsigned) * c);
     }
-    delete[] tmp;
-    re_id2pid();
+    _labels.resize(_nd);
+    reader.read((char *)_labels.data(), sizeof(unsigned) * _nd);
   }
   void re_id2pid() {
     id2pid.clear();
@@ -445,6 +440,71 @@ class graph_partitioner {
     std::cout << "each id, average overlap ratio: " << ave_overlap_ratio << std::endl;
   }
 
+  void partition_statistic_v2() {
+    std::vector<unsigned> overlap(_nd, 0);
+    std::vector<unsigned> blk_neighbor_overlap(_partition_number, 0);
+    double overlap_ratio = 0;
+    std::map<unsigned, unsigned> neighbors_set;
+    /* for (size_t i = 0; i < _partition_number; i++) { */
+    /*   for (size_t j = 0; j < _sizes[i].load(); j++) { */
+    /*     if (neighbors_set.find(_partition[i][j]) != neighbors_set.end()) { */
+    /*       std::cout << "error!" << std::endl; */
+    /*       std::cout << "id: " << _partition[i][j] << " partition: " << i << std::endl; */
+    /*       std::cout << "set has this id in blk " << neighbors_set[_partition[i][j]] << std::endl; */
+    /*       exit(-1); */
+    /*     } */
+    /*     neighbors_set.insert({_partition[i][j], i}); */
+    /*   } */
+    /* } */
+
+#pragma omp parallel for schedule(dynamic, 100) reduction(+ : overlap_ratio)
+    for (size_t i = 0; i < _partition_number; i++) {
+      std::unordered_set<unsigned> neighbors;
+      unsigned blk_neighbor_num = 0;
+      if (_sizes[i].load() > C) {
+        std::cout << "partition " << i << " size: " << _sizes[i].load() << std::endl;
+        std::cout << "error!" << std::endl;
+        exit(-1);
+      }
+      for (size_t j = 0; j < _sizes[i].load(); j++) {
+        auto id = _partition[i][j];
+        blk_neighbor_num += full_graph[_partition[i][j]].size();
+        std::unordered_set<unsigned> ne;
+        for (unsigned &x : full_graph[_partition[i][j]]) {
+          neighbors.insert(x);
+          ne.insert(x);
+        }
+        blk_neighbor_overlap[i] = blk_neighbor_num - neighbors.size();
+        for (size_t z = 0; z < _sizes[i].load(); z++) {
+          if (_partition[i][j] == _partition[i][z]) continue;
+          if (ne.find(_partition[i][z]) != ne.end()) {
+            overlap[_partition[i][j]]++;
+          }
+        }
+        overlap_ratio += (_partition[i].size() == 1 ? 0 : (1.0 * overlap[_partition[i][j]] / (_sizes[i].load() - 1)));
+      }
+    }
+    unsigned max_overlaps = 0;
+    unsigned min_overlaps = std::numeric_limits<unsigned>::max();
+    double ave_overlap_ratio = 0;
+    std::map<unsigned, unsigned> overlap_count;
+    for (size_t i = 0; i < _nd; i++) {
+      if (overlap_count.count(overlap[i])) {
+        overlap_count[overlap[i]]++;
+      } else {
+        overlap_count[overlap[i]] = 1;
+      }
+      if (overlap[i] > max_overlaps) max_overlaps = overlap[i];
+      if (overlap[i] < min_overlaps) min_overlaps = overlap[i];
+    }
+    ave_overlap_ratio = overlap_ratio / (double)_nd;
+    for (auto &it : overlap_count) {
+      std::cout << "each id, overlap number " << it.first << ", count: " << it.second << std::endl;
+    }
+    std::cout << "each id, max overlaps: " << max_overlaps << std::endl;
+    std::cout << "each id, min overlaps: " << min_overlaps << std::endl;
+    std::cout << "each id, average overlap ratio: " << ave_overlap_ratio << std::endl;
+  }
   unsigned select_partition(unsigned i) {
 #pragma omp atomic
     select_nums++;
@@ -499,81 +559,59 @@ class graph_partitioner {
     return res;
   }
 
+  unsigned getUnfilled_v2() {
+#pragma omp atomic
+    getUnfilled_nums++;
+    unsigned res;
+    do {
+      free_q.pop(res);
+    } while (_sizes[res].load() == C);
+    return res;
+  }
   // graph partition
   void graph_partition(const char *filename, int k, int lock_nums = 0) {
-    for (unsigned i = 0; i < _nd; i++) {
-      id2pid[i] = INF;
-    }
-    _partition.clear();
-    _partition.resize(_partition_number);
-    std::unordered_set<unsigned> vis;
-    std::vector<unsigned> init_stream;
-    init_stream.reserve(_nd);
-    if (!_freq_list.empty()) {
-      for (auto p : _freq_list) {
-        init_stream.emplace_back(p.first);
-      }
-    } else {
-      init_stream.resize(_nd);
-      std::iota(init_stream.begin(), init_stream.end(), 0);
-    }
-    _lock_nodes.clear();
-    _lock_pids.clear();
-    _lock_nodes.resize(_nd, false);
-    _lock_pids.resize(_partition_number, false);
-    unsigned pid = 0;
-    vis.clear();
-    if (lock_nums) {
-      std::cout << "lock first " << lock_nums << " nodes at init stage." << std::endl;
-    }
-    for (auto i : init_stream) {
-      if (vis.count(i)) {
-        lock_nums--;
-        continue;  // has insert into partition
-      }
-      if (_partition[pid].size() == C) {
-        ++pid;
-      }
-      vis.insert(i);
-      _partition[pid].push_back(i);
-      id2pid[i] = pid;
-      if (lock_nums > 0) {
-        _lock_pids[pid] = true;
-      }
-      for (unsigned s : full_graph[i]) {
-        if (vis.count(s)) continue;
-        if (_partition[pid].size() == C) {
-          ++pid;
-          break;
-        }
-        _partition[pid].push_back(s);
-        id2pid[s] = pid;
-        vis.insert(s);
-      }
-      if (lock_nums) --lock_nums;
-    }
-    int s = 0;
-    for (unsigned i = 0; i < _partition_number; i++) {
-      if (!_lock_pids[i]) break;
-      for (unsigned s : _partition[i]) {
-        _lock_nodes[s] = true;
-      }
-      s++;
-    }
-    if (_lock_pids[0]) {
-      std::cout << "finally, it locks partition nums: " << s << " locks nodes num: " << s * C << std::endl;
-    }
+    _labels.resize(_nd, INF);
 
+    // uninform random unsinged generator from 0 to _nd -1
+    auto seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::mt19937 g(seed);
+    // distribute random gener can produce a random number in range [0, _nd -1]
+    std::uniform_int_distribution<> dis(0, _partition_number - 1);
+
+    _partition = std::vector<std::vector<unsigned>>(_partition_number, std::vector<unsigned>(C, INF));
+    /* #pragma omp parallel for schedule(guided) */
+    /*     for (unsigned i = 0; i < _nd; i++) { */
+    /* auto random_label = dis(g); */
+    /* _labels[i] = random_label; */
+    /* } */
+    // malloc _sizes
+    _sizes = (std::atomic<unsigned> *)malloc(sizeof(std::atomic<unsigned>) * _partition_number);
+    // place new
+    new (_sizes) std::atomic<unsigned>[ _partition_number ];
+    seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::uniform_int_distribution<> dis1(0, _nd - 1);
+    std::uniform_int_distribution<> dis2(0, _partition_number - 1);
+    _fixed.resize(_fixed_sz);
+
+    for (size_t i = 0; i < _fixed_sz; i++) {
+      auto id = i;
+      auto pid = dis2(g);
+      while (_sizes[pid].load() == C) {
+        pid = dis2(g);
+      }
+      _fixed[id] = pid;
+      _sizes[pid].fetch_add(1);
+    }
     std::cout << "init over." << std::endl;
 
     for (int i = 0; i < k; i++) {
       select_free = 0;
       graph_partition_LDG();
       std::cout << "select free: " << (double)select_free / _partition_number << std::endl;
-      partition_statistic();
-      auto ivf_file_name = std::string(filename) + std::string(".ivf") + std::to_string(i + 1);
+      /* partition_statistic_v2(); */
+      /* auto ivf_file_name = std::string(filename) + std::string(".ivf") + std::to_string(i + 1); */
       std::cout << "total ivf time: " << ivf_time << std::endl;
-      save_partition(ivf_file_name.c_str());
+      /* save_partition(ivf_file_name.c_str()); */
     }
     save_partition(filename);
     std::cout << "select pid nums" << select_nums << " get unfilled partition nums: " << getUnfilled_nums << std::endl;
@@ -581,25 +619,32 @@ class graph_partitioner {
   }
   void graph_partition_LDG() {
     free_q.clear();
-#pragma omp parallel for
+
+#pragma omp parallel for schedule(guided)
     for (unsigned i = 0; i < _partition_number; i++) {
-      if (_lock_pids[i]) continue;
-      _partition[i].clear();
+      _sizes[i].store(0);
       free_q.push(i);
     }
-
+#pragma omp parallel for schedule(guided)
+    for (unsigned i = 0; i < _fixed_sz; i++) {
+      unsigned id = i;
+      unsigned pid = _fixed[id];
+      _partition[pid][_sizes[pid].fetch_add(1)] = id;
+      _labels[id] = pid;
+    }
     cur = 0;
     std::cout << "start" << std::endl;
-    std::vector<unsigned> stream(_nd);
-    std::iota(stream.begin(), stream.end(), 0);
-    auto rng = std::default_random_engine{};
-    std::shuffle(std::begin(stream), std::end(stream), rng);
+    /* std::vector<unsigned> stream(_nd); */
+    /* std::iota(stream.begin(), stream.end(), 0); */
+    /* auto rng = std::default_random_engine{}; */
+    /* std::shuffle(std::begin(stream), std::end(stream), rng); */
     auto start = omp_get_wtime();
-#pragma omp parallel for schedule(dynamic)
-    for (unsigned i = 0; i < _nd; i++) {
-      size_t n = stream[i];
-      if (_lock_nodes[n]) continue;
-      sync(n);
+#pragma omp parallel for schedule(guided)
+    for (unsigned i = _fixed_sz; i < _nd; i++) {
+      size_t n = i;
+      while (sync_v2(n) == false) {
+        continue;
+      }
       cout_step();
     }
     auto end = omp_get_wtime();
@@ -626,6 +671,50 @@ class graph_partitioner {
     }
 
     return pid;
+  }
+
+  unsigned select_partition_v2(unsigned u) {
+    unsigned res = INF;
+    std::unordered_map<unsigned, unsigned> pcount;
+    for (auto n : direct_graph[u]) {
+      unsigned label = _labels[n];
+      if (label == INF) continue;
+      pcount[label] = pcount[label] + 1;
+    }
+    for (auto n : reverse_graph[u]) {
+      unsigned label = _labels[n];
+      if (label == INF) continue;
+      pcount[label] = pcount[label] + 1;
+    }
+    float max_gain = 0.0;
+    for (auto c : pcount) {
+      unsigned label = c.first;
+      float cnt = c.second;
+      unsigned sz = _sizes[label].load();
+      double gain = (double)cnt * ((double)1 - (double)sz / C);
+      if (gain > max_gain && sz < C) {
+        res = label;
+        max_gain = gain;
+      }
+    }
+    return res;
+  }
+  bool sync_v2(unsigned u) {
+    unsigned select_label = select_partition_v2(u);
+    unsigned label = select_label == INF ? getUnfilled_v2() : select_label;
+    auto old_sz = _sizes[label].load(std::memory_order_relaxed);
+    while (old_sz != C && !_sizes[label].compare_exchange_weak(old_sz, old_sz + 1, std::memory_order_seq_cst)) {
+      continue;
+    }
+    if (old_sz == C) {
+      return false;
+    }
+    _labels[u] = label;
+    _partition[label][old_sz] = u;
+    if (old_sz + 1 != C and select_label == INF) {
+      free_q.push(label);
+    }
+    return true;
   }
 
  private:
@@ -662,5 +751,10 @@ class graph_partitioner {
   vpu _freq_nei_list;
   std::vector<bool> _lock_nodes;
   std::vector<bool> _lock_pids;
+
+  std::atomic<unsigned> *_sizes;
+  std::vector<unsigned> _labels;
+  std::vector<unsigned> _fixed;
+  unsigned _fixed_sz = 0;
 };
 }  // namespace GP
