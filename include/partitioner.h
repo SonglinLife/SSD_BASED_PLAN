@@ -440,7 +440,7 @@ class graph_partitioner {
     std::cout << "each id, average overlap ratio: " << ave_overlap_ratio << std::endl;
   }
 
-  void partition_statistic_v2() {
+  float partition_statistic_v2() {
     std::vector<unsigned> overlap(_nd, 0);
     std::vector<unsigned> blk_neighbor_overlap(_partition_number, 0);
     double overlap_ratio = 0;
@@ -504,6 +504,7 @@ class graph_partitioner {
     std::cout << "each id, max overlaps: " << max_overlaps << std::endl;
     std::cout << "each id, min overlaps: " << min_overlaps << std::endl;
     std::cout << "each id, average overlap ratio: " << ave_overlap_ratio << std::endl;
+    return ave_overlap_ratio;
   }
   unsigned select_partition(unsigned i) {
 #pragma omp atomic
@@ -569,7 +570,7 @@ class graph_partitioner {
     return res;
   }
   // graph partition
-  void graph_partition(const char *filename, int k, int lock_nums = 0) {
+  void graph_partition(const char *filename, int k, bool early_stop = false, int lock_nums = 0) {
     _labels.resize(_nd, INF);
 
     // uninform random unsinged generator from 0 to _nd -1
@@ -603,15 +604,22 @@ class graph_partitioner {
       _sizes[pid].fetch_add(1);
     }
     std::cout << "init over." << std::endl;
+    auto old_or = 0.0f;
 
     for (int i = 0; i < k; i++) {
       select_free = 0;
       graph_partition_LDG();
       std::cout << "select free: " << (double)select_free / _partition_number << std::endl;
-      /* partition_statistic_v2(); */
+      auto avg_or = partition_statistic_v2();
       /* auto ivf_file_name = std::string(filename) + std::string(".ivf") + std::to_string(i + 1); */
       std::cout << "total ivf time: " << ivf_time << std::endl;
       /* save_partition(ivf_file_name.c_str()); */
+      if(early_stop and (avg_or - old_or)/old_or < 0.01) {
+        std::cout << "end at round: " << i << std::endl;
+        break;
+      }else {
+        old_or = avg_or;
+      }
     }
     save_partition(filename);
     std::cout << "select pid nums" << select_nums << " get unfilled partition nums: " << getUnfilled_nums << std::endl;

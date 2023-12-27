@@ -16,7 +16,7 @@ int main(int argc, char **argv) {
   namespace po = boost::program_options;
   std::string index_file, data_type, gp_file, freq_file;
   unsigned block_size, ldg_times, lock_nums, thead_nums, cut, fixed_ratio =0;
-  bool use_disk, visual;
+  bool use_disk, visual, early_stop;
 
   po::options_description desc{"Arguments"};
   try {
@@ -41,6 +41,8 @@ int main(int argc, char **argv) {
     desc.add_options()("visual", po::value<bool>(&visual)->default_value(0),
                        "see real time progress of graph partition");
     desc.add_options()("cut", po::value<unsigned>(&cut)->default_value(INF), "cut adj list, use 3 means graph degree will be cut to 3");
+    desc.add_options()("early_stop", po::value<bool>(&early_stop)->default_value(0),
+                       "early stop, use 1 means early stop, 0 means not");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
