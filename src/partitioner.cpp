@@ -58,6 +58,6 @@ int main(int argc, char **argv) {
   std::cout << "cut: " << cut << std::endl;
   GP::graph_partitioner partitioner(index_file.c_str(), data_type.c_str(), fixed_ratio, use_disk, block_size, visual,
                                     freq_file, cut);
-  partitioner.graph_partition(gp_file.c_str(), ldg_times, lock_nums);
+  partitioner.graph_partition(gp_file.c_str(), ldg_times, early_stop, lock_nums);
   return 0;
 }

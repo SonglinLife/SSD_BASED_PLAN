@@ -123,7 +123,7 @@ class graph_partitioner {
     _gen = new std::mt19937((*_rd)());
     _dis = new std::uniform_real_distribution<>(0, 1);
     if (load_disk) {
-      if (std::string(data_type) == std::string("uint8")) {
+      if (std::string(data_type) == std::string("uint8") or std::string(data_type) == std::string("int8")) {
         load_disk_index<uint8_t>(indexName, BS);
       } else if (std::string(data_type) == std::string("float")) {
         load_disk_index<float>(indexName, BS);
